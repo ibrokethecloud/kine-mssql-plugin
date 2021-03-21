@@ -39,10 +39,6 @@ const (
 	defaultMaxIdleConns = 2 // copied from database/sql
 )
 
-type Driver struct {
-	*logstructured.LogStructured
-}
-
 var (
 	schema = []string{
 		`if not exists (SELECT * FROM INFORMATION_SCHEMA.TABLES
@@ -113,21 +109,22 @@ var (
 			  ( kv.deleted = 0 OR 'true' = ? )
 		ORDER BY kv.id ASC
 		`, revSQL, compactRevSQL, columns)
-	ExternalDriver = Driver{}
 )
 
-func (d *Driver) New(ctx context.Context, dataSourceName string, tlsInfo tls.Config, connectionPool generic.ConnectionPoolConfig) (err error) {
+func New(ctx context.Context, dataSourceName string, tlsInfo tls.Config,
+	connectionPool generic.ConnectionPoolConfig) (backend server.Backend, err error) {
 	parsedDSN, err := prepareDSN(dataSourceName, tlsInfo)
+	backend = &logstructured.LogStructured{}
 	if err != nil {
-		return err
+		return backend, err
 	}
 
 	if err := createDBIfNotExist(parsedDSN); err != nil {
-		return err
+		return backend, err
 	}
 	dialect, err := setupGenericDriver(ctx, "sqlserver", parsedDSN, "@p", connectionPool, true)
 	if err != nil {
-		return err
+		return backend, err
 	}
 
 	dialect.TranslateErr = func(err error) error {
@@ -155,12 +152,12 @@ func (d *Driver) New(ctx context.Context, dataSourceName string, tlsInfo tls.Con
 		) AS ks
 		WHERE kv.id = ks.id`
 	if err := setup(dialect.DB); err != nil {
-		return err
+		return backend, err
 	}
 
 	dialect.Migrate(context.Background())
-	d.LogStructured = logstructured.New(sqllog.New(dialect))
-	return nil
+	backend = logstructured.New(sqllog.New(dialect))
+	return backend, nil
 }
 
 func setupGenericDriver(ctx context.Context, driverName, dataSourceName string, paramCharacter string, connectionPool generic.ConnectionPoolConfig,
